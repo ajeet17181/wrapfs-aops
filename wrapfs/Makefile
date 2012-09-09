@@ -1,0 +1,16 @@
+WRAPFS_VERSION="0.1"
+
+#EXTRA_CFLAGS += -DWRAPFS_DEBUG -DWRAPFS_CRYPTO -DEXTRA_CREDIT -DWRAPFS_VERSION=\"$(WRAPFS_VERSION)\"
+#EXTRA_CFLAGS += -DWRAPFS_DEBUG -DEXTRA_CREDIT -DWRAPFS_VERSION=\"$(WRAPFS_VERSION)\"
+#EXTRA_CFLAGS += -DWRAPFS_CRYPTO -DEXTRA_CREDIT -DWRAPFS_VERSION=\"$(WRAPFS_VERSION)\"
+EXTRA_CFLAGS += -DWRAPFS_CRYPTO -DWRAPFS_VERSION=\"$(WRAPFS_VERSION)\"
+#EXTRA_CFLAGS += -DEXTRA_CREDIT -DWRAPFS_VERSION=\"$(WRAPFS_VERSION)\"
+#EXTRA_CFLAGS += -DWRAPFS_VERSION=\"$(WRAPFS_VERSION)\"
+
+obj-$(CONFIG_WRAP_FS) += wrapfs.o
+
+wrapfs-y := dentry.o file.o inode.o main.o super.o lookup.o mmap.o
+
+all:
+	gcc -Wall -Werror -I/lib/modules/$(shell uname -r)/build/include -lcrypt user_test_ioctl.c -o user_test_ioctl
+

@@ -1,0 +1,169 @@
+ADDRESS SPACE OPERATIONS AND ENCRYPTION/DECRYPTION OF FILES IN WRAPFS
+---------------------------------------
+Assignment by : Ram Angara (108393116)
+I have implemented address space operations in the wrapfs module. Support for encryption and decryption is also provided when WRAPFS_CRYPTO is defined. Extra-credit-2 is also implemented when EXTRA_CREDIT flag is enabled. Detailed description is given below.
+
+=============================================================
+New Files added:
+	- include/linux/wrapfs_ioctl.h : The header file which is used by the wrapfs module and userspace program. It contains the ioctl numbers defined to for setting/revoking the key when WRAPFS_CRYPTO is enabled.
+	- fs/wrapfs/user_test_ioctl.c : User-space program to set/revoke the key.
+
+Modified Files:
+	- fs/wrapfs/wrapfs.h
+	- fs/wrapfs/main.c
+	- fs/wrapfs/mmap.c
+	- fs/wrapfs/dentry.c
+	- fs/wrapfs/file.c
+	- fs/wrapfs/inode.c
+	- fs/wrapfs/lookup.c
+	- fs/wrapfs/super.c
+	- .config
+
+=============================================================
+Compilation:
+---------------------------------------
+1. The checked-in kernel config file contains options necessary to build wrapfs.
+2. fs/wrapfs/Makefile can be modified and necessary flags can be set. WRAPFS_CRYPTO and EXTRA_CREDIT flags are supported.
+3. From the source directory, run make. This creates fs/wrapfs/wrapfs.ko which can be inserted using insmod.
+4. From within fs/wrapfs if we run make, the userspace executable user_test_ioctl will be generated to set/revoke the key.
+
+Usage:
+---------------------------------------
+1. After insmod, first mount an existing disk on ext3:
+	mount -t ext3  /dev/hdb <EXT3_MOUNT_POINT>
+2. Then, mount wrapfs on this:
+	mount -t wrapfs -o [options] <EXT3_MOUNT_POINT> <WRAPFS_MOUNT_POINT>
+	options can be	(i) mmap --> aops will be invoked
+			(ii) debug=X where X is the debug level, when EXTRA_CREDIT is enabled.
+	Any other options are not supported and will be ignored.
+3. If WRAPFS_CRYPTO is enabled, then user must set a key to read/write files. This is set to NULL by default and user cannot read and write unless he provides a key. To set the key, go to fs/wrapfs and execute make. This generates the executable user_test_ioctl.
+	./user_test_ioctl <WRAPFS_MOUNT_POINT> <KEY>
+	KEY must be atleast 6 characters.
+To remove an existing key, "000000" has to be entered as the KEY.
+
+=============================================================
+PART-1 : Modify the code to support address_space operations instead of vm_ops operations.
+---------------------------------------
+The wrapfs code implements only vm_ops, and I have tried to support address_space_operations(aops).
+When mmap option is provided during mount-time, aops are used. Otherwise vm_ops will be used.
+I use a boolean flag in the private pointer of superblock to check if mmap is enabled or not.
+This flag is called mmap_option_set.
+To support aops, I have added the following two structs:
+In mmap.c : 
+const struct address_space_operations wrapfs_mmap_aops = {
+        .readpage = wrapfs_readpage,
+        .writepage = wrapfs_writepage,
+        .write_begin = wrapfs_write_begin,
+        .write_end = wrapfs_write_end,
+        .bmap = wrapfs_bmap,
+};
+In file.c, following are modified:
+const struct file_operations wrapfs_main_mmap_fops = {
+        .read           = wrapfs_read,
+        .write          = wrapfs_write,
+        .unlocked_ioctl = wrapfs_unlocked_ioctl,
+        .aio_read       = generic_file_aio_read,
+        .aio_write      = generic_file_aio_write,
+        .mmap           = wrapfs_mmap,
+};
+-->wrapfs_read and -->wrapfs_write handle read/write differently based on mmap_option_set.
+If TRUE, do_sync_read/do_sync_read is called on wrapfs file which inturn invoke 
+wrapfs_readpage/wrapfs_writepage. When it is false, a plain vfs_read/vfs_write on 
+lower_file is called.
+wrapfs_mmap_aops structure is explained in more detail below.
+
+=============================================================
+PART-2 : Add file data encryption
+---------------------------------------
+I have used my_encrypt and my_decrypt functions from hw1. I tried using CBC AES cipher for encryption.
+But since it needs padding and that extra information needs to be stored persistantly, I had switched to
+CTR AES cipher. At the time of reading, the pages which are read from lower-file are in encrypted state, 
+and they are decrypted and sent back to the user. While writing data to lower files, they are encrypted at
+the wrapfs layer and written to lower file. This way plaintext data is never stored on the lower file system.
+The key used to encrypt and decrypt is stored in the private field of superblock. "000000" is the default key,
+which means key is not set and reads/writes are not allowed.
+
+=============================================================
+ADDRESS SPACE OPERATIONS:
+---------------------------------------
+-->wrapfs_readpage: This is taken from unionfs. No modifications have been done for Part-1.
+	 For Part-2, after data is read from lower file, it is decrypted and sent to the user.
+-->wrapfs_writepage: This code is also taken from unionfs. When encryption is enabled, the lower page data is
+	encrypted and written back whenever memory pressure is applied.
+-->wrapfs_write_begin: I have followed the behavior from ecryptfs. write_begin sets up the page for writing. 
+	1. If Encrypt is not enabled, then just grab the page and set it up for write_begin. 
+	   It is almost similar to ecryptfs. When we seek to a position after EOF and write, 
+	   then the copied bytes are adjusted accordingly and passed. For example, if the file contains 
+	   2000 bytes and if we write 1000 bytes from 3000th position(by lseeking),
+	   then "from" contains 3000 and copied contains 1000.  So we can directly copy 1000 bytes to lower file.
+	2. When Encrypt is enabled, three cases are possible. I have handled zero bytes cases explicitly.
+		a. The page to write is same as last page in original file. We need to fill zeroes
+		   upto the positon where write begins. 
+		b. The page to write is an intermediate file page. Nothing needs to be done here.
+		c. If we skip to a page more than the last page in file, then we need to fill 
+		   holes between current last page and the index of page to be written. All these pages
+		   are marked as dirty.
+-->wrapfs_write_end: When control enters this function, the required data and the offsets are present
+	in the arguments. When crypt is not enabled, this is the same as unionfs. When crypt is enabled,
+	before writing data back to the lower file, it is encrypted and then written.
+-->wrapfs_bmap: This is taken from unionfs and no changes were made to it.
+
+============================================================
+IOCTL:
+---------------------------------------
+To set the key, I have written a user level program which calls wrapfs_unlocked_ioctl.
+I followed the UNIONFS way of using a header for this. The key is defined in include/linux/wrapfs_ioctl.h
+	#define WRAPFS_IOCTL_SET_KEY    _IOW('x', 11, char*)
+This is as per the directions given in Documentation/ioctl/ioctl-number.txt and it can be used both
+by wrapfs module as well as user program.
+Whenever a key is modified or revoked, existing pages in cache must be flushed. Otherwise stale pages will
+be read from cache and this is a security hole. To fix this, I have used shrink_dcache_sb() on the superblock
+which frees the cache.
+
+===========================================================
+Extra Credit 2:
+---------------------------------------
+Debugging support is added to enable a subset of operations. To enable debugging, EXTRA_CREDIT flag must be
+enabled in the Makefile and wrapfs must be mounted. For example:
+	 mount -t wrapfs -o debug=3 ...
+This will enable debugging for superblock and inode ops. As mentioned in the specification, following bitmaps are used:
+	0x01: enable debugging for superblock ops
+	0x02: enable debugging for inode ops
+	0x04: enable debugging for dentry ops
+	0x10: enable debugging for file ops
+	0x20: enable debugging for address_space ops
+	0x40: enable debugging for all other ops
+These flags are stored in the superblock private data and are set at the time of mount.
+I have defined custom macros in wrapfs.h to handle these debug messages. For example:
+	#define wrapfs_debug_sbops(val, fmt, arg...) \
+        val ? printk(KERN_DEFAULT "DBG:%s:%s:%d: " fmt "\n", \
+                __FILE__, __func__, __LINE__, ## arg) : 1;
+Here val is the boolean value superblock->private->wrapfs_debug_sb_ops. 
+If this is set, only then the superblock debug messages are printed.
+
+=============================================================
+Testing:
+---------------------------------------
+To test the assignment using LTP, first compile wrapfs with necessary flags and insmod it.
+Then, mount options need to be mentioned in j-ltp.sh. If WRAPFS_CRYPTO is enabled, then after mount key can be set using:
+	runcmd /usr/src/hw2-rangara/fs/wrapfs/user_test_ioctl $UPPER_MNTPT "hellowworld"
+I ran the LTP test suite and following are the results. The default wrapfs gave an oops during mknod.
+Hence I had to comment out those test cases and ran again.
+1. On default wrapfs, following cases failed:
+	ioctl, lseek, madvise, sockioctl, sysctl
+2. When I have written code for aops, and gave -o mmap during mount and WRAPFS_CRYPTO disabled, following failed.
+System was going out of memory when swapon/swapoff were called, and I commented these.
+	msync failed in addition to those above.
+3. After turning on WRAPFS_CRYPTO and running LTP, the following caused errors:
+	remap_file_pages, mmap
+	
+============================================================
+Miscellaneous:
+---------------------------------------
+1. I have run the checkpatch.sh script and removed all warnings and errors. I have made the code completely style-compliant.
+2. When key entered using ioctl is less than 6 characters, I throw an error.
+3. I have written a sample shell script to ease the mounting process. It is at the top of source tree called setup_mount.sh.
+   To run it, we have to give the same options as we give in mount. For example:
+	./setup_mount.sh mmap,debug=3
+   However, this is dependent on the machine on which it is run as I have hardcoded the mount paths.
+

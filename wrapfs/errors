@@ -1,0 +1,34 @@
+ERROR: do not initialise globals to 0 or NULL
+#15: FILE: main.c:15:
++bool mmap_option_set = false;
+
+ERROR: do not initialise globals to 0 or NULL
+#16: FILE: main.c:16:
++bool wrapfs_debug_sb_ops = false;
+
+ERROR: do not initialise globals to 0 or NULL
+#17: FILE: main.c:17:
++bool wrapfs_debug_i_ops = false;
+
+ERROR: do not initialise globals to 0 or NULL
+#18: FILE: main.c:18:
++bool wrapfs_debug_d_ops = false;
+
+ERROR: do not initialise globals to 0 or NULL
+#19: FILE: main.c:19:
++bool wrapfs_debug_f_ops = false;
+
+ERROR: do not initialise globals to 0 or NULL
+#20: FILE: main.c:20:
++bool wrapfs_debug_a_ops = false;
+
+ERROR: do not initialise globals to 0 or NULL
+#21: FILE: main.c:21:
++bool wrapfs_debug_other_ops = false;
+
+total: 7 errors, 0 warnings, 286 lines checked
+
+main.c has style problems, please review.
+
+If any of these errors are false positives, please report
+them to the maintainer, see CHECKPATCH in MAINTAINERS.
